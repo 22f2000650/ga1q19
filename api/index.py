@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from openai import OpenAI
@@ -7,48 +7,64 @@ import os
 
 app = FastAPI()
 
-# Enable CORS
+# ✅ CORS configuration (IMPORTANT for browser requests)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["*"],        # Allow all origins
+    allow_credentials=False,    # Must be False when using "*"
+    allow_methods=["*"],        # Allow POST and OPTIONS
+    allow_headers=["*"],        # Allow all headers
 )
 
+# Initialize OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+# Request model
 class SimilarityRequest(BaseModel):
     docs: list[str]
     query: str
 
 
+# Cosine similarity function
 def cosine_similarity(a, b):
-    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+    a = np.array(a)
+    b = np.array(b)
+    return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
 
 
+# POST endpoint
 @app.post("/similarity")
 async def similarity(data: SimilarityRequest):
 
-    inputs = data.docs + [data.query]
+    if not data.docs or not data.query:
+        raise HTTPException(status_code=400, detail="docs and query required")
 
-    response = client.embeddings.create(
-        model="text-embedding-3-small",
-        input=inputs
-    )
+    try:
+        # Combine docs and query for batch embedding
+        inputs = data.docs + [data.query]
 
-    embeddings = [item.embedding for item in response.data]
+        response = client.embeddings.create(
+            model="text-embedding-3-small",
+            input=inputs
+        )
 
-    doc_embeddings = embeddings[:-1]
-    query_embedding = embeddings[-1]
+        embeddings = [item.embedding for item in response.data]
 
-    scores = []
+        doc_embeddings = embeddings[:-1]
+        query_embedding = embeddings[-1]
 
-    for i, doc_embed in enumerate(doc_embeddings):
-        score = cosine_similarity(query_embedding, doc_embed)
-        scores.append((score, data.docs[i]))
+        scores = []
 
-    scores.sort(reverse=True, key=lambda x: x[0])
+        for i, doc_embed in enumerate(doc_embeddings):
+            score = cosine_similarity(query_embedding, doc_embed)
+            scores.append((score, data.docs[i]))
 
-    top_3 = [doc for _, doc in scores[:3]]
+        # Sort by similarity descending
+        scores.sort(reverse=True, key=lambda x: x[0])
 
-    return {"matches": top_3}
+        top_3 = [doc for _, doc in scores[:3]]
+
+        return {"matches": top_3}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

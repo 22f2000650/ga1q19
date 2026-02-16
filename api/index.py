@@ -11,8 +11,7 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["POST", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
@@ -28,7 +27,7 @@ def cosine_similarity(a, b):
 
 
 @app.post("/similarity")
-async def compute_similarity(data: SimilarityRequest):
+async def similarity(data: SimilarityRequest):
 
     inputs = data.docs + [data.query]
 
@@ -42,14 +41,14 @@ async def compute_similarity(data: SimilarityRequest):
     doc_embeddings = embeddings[:-1]
     query_embedding = embeddings[-1]
 
-    similarities = []
+    scores = []
 
     for i, doc_embed in enumerate(doc_embeddings):
         score = cosine_similarity(query_embedding, doc_embed)
-        similarities.append((score, data.docs[i]))
+        scores.append((score, data.docs[i]))
 
-    similarities.sort(reverse=True, key=lambda x: x[0])
+    scores.sort(reverse=True, key=lambda x: x[0])
 
-    top_matches = [doc for _, doc in similarities[:3]]
+    top_3 = [doc for _, doc in scores[:3]]
 
-    return {"matches": top_matches}
+    return {"matches": top_3}
